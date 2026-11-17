@@ -1,0 +1,446 @@
+---
+title: "BÁO CÁO TIỂU LUẬN: CHƯƠNG 2 - CƠ SỞ LÝ THUYẾT VÀ PHƯƠNG PHÁP NGHIÊN CỨU"
+subtitle: "Đề tài PRJ-04: Xây dựng Mô hình Dự báo Chi phí Bồi thường Bảo hiểm Y tế (Medical Insurance Claims & Cost Prediction)"
+author:
+  - name: "Nguyễn Ngọc Phương Thảo (MSSV: 2521001099) - Nhóm trưởng"
+  - name: "Phan Thị Quế Trân (MSSV: 2521001108)"
+date: today
+lang: vi
+format:
+  docx:
+    toc: true
+    toc-depth: 3
+    number-sections: false
+    highlight-style: github
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: false
+    theme: cosmo
+    code-fold: false
+jupyter: python3
+---
+
+# LỜI MỞ ĐẦU CHƯƠNG 2 {.unnumbered}
+
+Chương 2 thiết lập toàn bộ nền tảng cơ sở lý luận chuyên ngành bảo hiểm y tế, khung phương pháp luận nghiên cứu thực nghiệm và hệ thống công cụ phân tích dữ liệu phục vụ cho Đề tài PRJ-04. Nội dung chương được kết cấu chặt chẽ theo 5 trọng tâm:
+
+1. **Mục 2.1:** Lý thuyết tổn thất bảo hiểm hai giai đoạn (Frequency & Severity), phân tích toán học về phân phối lệch phải cực đại và đuôi dày của chi phí y tế, cùng sự phân định nghiệp vụ giữa điều trị Nội trú (Inpatient) và khám Ngoại trú (Outpatient).
+2. **Mục 2.2:** Tổng quan 5 công trình nghiên cứu thực nghiệm quốc tế tiêu biểu, phân tích khoảng trống nghiên cứu và đóng góp học thuật của đề tài.
+3. **Mục 2.3:** Quy trình Khoa học Dữ liệu tinh chỉnh từ CRISP-DM gồm 6 giai đoạn và Sơ đồ khái niệm kiến trúc dữ liệu bồi thường CMS Claims.
+4. **Mục 2.4:** Cơ sở toán học của 4 lớp mô hình dự báo (Hồi quy Tuyến tính OLS trên biến đổi logarit, Hồi quy Tuyến tính Điều chuẩn Ridge & Lasso, Mô hình Tuyến tính Tổng quát GLM Gamma & Tweedie, Thuật toán Cây quyết định Ensemble: Random Forest & Gradient Boosting: XGBoost / LightGBM), hệ thống kiểm định thống kê ứng dụng (Welch's $t$-test / Mann–Whitney U, One-Way ANOVA / Kruskal–Wallis, tương quan hạng Spearman) và các chỉ số đánh giá hiệu năng ($R^2$, RMSE, MAE, MAPE).
+5. **Mục 2.5:** Môi trường thực nghiệm, cấu hình phần cứng thực tế, ngăn xếp thư viện Python 3.12 và cam kết tính tái lập (Reproducibility) của kết quả nghiên cứu.
+
+---
+
+# CHƯƠNG 2: CƠ SỞ LÝ THUYẾT VÀ PHƯƠNG PHÁP NGHIÊN CỨU
+
+## 2.1. Cơ sở lý thuyết chuyên ngành Bảo hiểm & Thẩm định Tài chính
+
+### 2.1.1. Lý thuyết Mô hình Tổng Tổn thất (Aggregate Loss Model: Frequency & Severity)
+
+Trong nghiệp vụ Định phí Bảo hiểm Phi nhân thọ (Non-Life Insurance Actuarial Pricing) và Quản trị Rủi ro Y tế, việc lượng hóa chi phí bồi thường được tiếp cận dựa trên **Mô hình Rủi ro Tổng thể Hai giai đoạn (Two-part Compound Risk Model)**. 
+
+Giả sử trong một chu kỳ tính phí (thường là một năm tài chính), tổng chi phí bồi thường bồi hoàn của một danh mục hợp đồng bảo hiểm hoặc của một người thụ hưởng được ký hiệu là biến ngẫu nhiên $S$. Khi đó, $S$ được xác định thông qua tổng ngẫu nhiên:
+
+$$S = \sum_{i=1}^{N} X_i$$
+
+Trong đó:
+
+- **Tần số bồi thường (Claim Frequency - $N$):** Là biến ngẫu nhiên rời rạc đại diện cho số lượt yêu cầu bồi thường phát sinh trong kỳ của người tham gia ($N \in \{0, 1, 2, \dots\}$). Trong lý thuyết tính toán bảo hiểm, biến tần số thường được mô hình hóa bằng phân phối Poisson:
+  $$\mathbb{P}(N = k) = \frac{\lambda^k e^{-\lambda}}{k!}, \quad k = 0, 1, 2, \dots$$
+  với $\mathbb{E}[N] = \text{Var}(N) = \lambda$. Khi dữ liệu thực tế xuất hiện hiện tượng phân tán vượt mức (Overdispersion, tức $\text{Var}(N) > \mathbb{E}[N]$ do sự khác biệt lớn về mức độ rủi ro giữa các cá nhân), phân phối Nhị thức Âm (Negative Binomial Distribution) sẽ được lựa chọn thay thế.
+- **Mức độ nghiêm trọng của tổn thất (Claim Severity - $X_i$):** Là biến ngẫu nhiên liên tục dương đại diện cho số tiền bồi thường thực tế phát sinh tại lần khám hoặc điều trị thứ $i$ ($X_i > 0$). Các biến $X_1, X_2, \dots, X_N$ được giả định là độc lập và cùng tuân theo một phân phối xác suất liên tục $F_X(x)$ (thường là phân phối Lognormal, Gamma, hoặc Pareto).
+- Khi không phát sinh yêu cầu bồi thường ($N = 0$), tổng tổn thất được quy ước $S = 0$.
+
+Dựa trên **Định lý Wald (Wald's Identity)** và **Quy luật Phương sai Toàn phần (Law of Total Variance)**, kỳ vọng và phương sai của tổng chi phí bồi thường được tính toán như sau:
+
+$$\mathbb{E}[S] = \mathbb{E}[N] \cdot \mathbb{E}[X]$$
+
+$$\text{Var}(S) = \mathbb{E}[N] \cdot \text{Var}(X) + (\mathbb{E}[X])^2 \cdot \text{Var}(N)$$
+
+Phương trình trên là nền tảng cốt lõi để nhà định phí xác định **Phí bảo hiểm thuần (Net Pure Premium - $P_{\text{net}}$)**:
+
+$$P_{\text{net}} = \mathbb{E}[S] = \mathbb{E}[N] \cdot \mathbb{E}[X]$$
+
+Để đảm bảo doanh nghiệp không bị mất khả năng thanh toán khi xảy ra các biến cố bất lợi lớn, **Phí bảo hiểm gộp (Gross Premium - $P_{\text{gross}}$)** được xác lập bằng cách cộng thêm phụ phí an toàn rủi ro (Risk Loading - $\theta$) và chi phí quản lý vận hành ($\kappa$):
+
+$$P_{\text{gross}} = (1 + \theta) \cdot P_{\text{net}} + \kappa = (1 + \theta) \cdot \mathbb{E}[N] \cdot \mathbb{E}[X] + \kappa$$
+
+Cần lưu ý sự phân định quan trọng giữa cơ chế bảo hiểm và phương pháp ước lượng thống kê:
+- Trong bảo hiểm, **Quy luật Số lớn (Law of Large Numbers)** và **Định lý Giới hạn Trung tâm (Central Limit Theorem)** là nền tảng của **cơ chế gom rủi ro (Risk Pooling)**: khi một số lượng lớn cá nhân cùng tham gia vào quỹ bảo hiểm, tỷ lệ tổn thất trung bình thực tế sẽ hội tụ hầu chắc chắn về tổn thất kỳ vọng lý thuyết, làm suy giảm độ bất định trên mỗi đầu hợp đồng.
+- Trong khi đó, đối với **ước lượng mô hình học máy và thống kê**, quy mô mẫu lớn với tổng cộng **527,288 bản ghi thô** (gồm 517,737 hồ sơ khám ngoại trú và 9,551 hồ sơ điều trị nội trú) cung cấp cơ sở dữ liệu thực nghiệm dồi dào để nhận diện các quy luật chi phí phức tạp, giảm phương sai mẫu (Sampling Variance), nhưng đồng thời đòi hỏi các kỹ thuật tiền xử lý cẩn trọng nhằm kiểm soát rủi ro rò rỉ dữ liệu và giải quyết hiện tượng phân phối đuôi dày.
+
+### 2.1.2. Phân phối Chi phí Bồi thường: Hiện tượng Lệch phải Cực đại và Đuôi dày
+
+Trong thống kê ứng dụng y tế, biến số chi phí chi trả bồi thường (`InscClaimAmtReimbursed`) có những đặc tính phân phối hoàn toàn khác biệt so với các dữ liệu kinh tế lượng truyền thống:
+
+1. **Tính chất bị chặn dưới tại 0 và có tỷ lệ hồ sơ bồi hoàn bằng 0 (Non-negative & Zero values):**
+   Số tiền bồi hoàn không bao giờ nhận giá trị âm ($Y \ge 0$). Trong dữ liệu thực tế khảo sát của nhóm, có **3.8%** số hồ sơ ngoại trú và **2.6%** số hồ sơ nội trú có mức bồi thường bằng 0 USD. Hiện tượng này phát sinh trong thực tế khi chi phí khám chữa bệnh chưa vượt qua mức khấu trừ tự chi trả (`DeductibleAmtPaid`) của người bệnh, hoặc hồ sơ bồi thường chưa được phê duyệt chi trả, bị từ chối do không thuộc phạm vi bảo hiểm.
+2. **Độ lệch phải cực đại (Extreme Positive Skewness):**
+   Hệ số bất đối xứng (Skewness - $\gamma_1$) được định nghĩa:
+   $$\gamma_1 = \mathbb{E}\left[ \left( \frac{X - \mu}{\sigma} \right)^3 \right] = \frac{\mu_3}{\sigma^3}$$
+   Trong phân phối chuẩn đối xứng, $\gamma_1 = 0$. Tuy nhiên, trong tập dữ liệu Medicare thực tế của đề tài, hệ số lệch phải đo được đạt tới **$\gamma_1 = +61.6$** ở hồ sơ ngoại trú và **$\gamma_1 = +25.2$** ở hồ sơ nội trú. Điều này phản ánh thực tế rằng đại bộ phận các ca khám chữa bệnh thông thường chỉ phát sinh chi phí thấp (giá trị trung vị ngoại trú chỉ là 80 USD), nhưng giá trị trung bình lại bị kéo lên tới 2,558.34 USD bởi các ca bệnh phức tạp. Tương tự, ở tập nội trú, giá trị trung vị là 8,000 USD trong khi giá trị trung bình lên tới 93,128.71 USD.
+3. **Phân phối đuôi dày (Heavy-tailed Distribution):**
+   Đuôi dày được định nghĩa là phân phối xác suất có phần đuôi suy giảm **chậm hơn hàm mũ** (thường mang dạng hàm lũy thừa hoặc hàm dưới số mũ - sub-exponential decay), tức thỏa mãn:
+   $$\lim_{x \to \infty} e^{\lambda x} \mathbb{P}(X > x) = \infty \quad \forall \lambda > 0$$
+   Hệ số nhọn (Pearson's Kurtosis - $\kappa$) của dữ liệu ngoại trú đạt xấp xỉ **6,349** và nội trú xấp xỉ **769** (vượt rất xa mức chuẩn $\kappa = 3$ của phân phối chuẩn). Theo tiêu chuẩn khoảng tứ phân vị ($> Q_3 + 1.5 \times \text{IQR}$), tỷ lệ hồ sơ ngoại lai chiếm tới **13.02%** ở ngoại trú và **8.59%** ở nội trú.
+
+**Tác động của phép biến đổi logarit $\ln(y + 1)$ và hiện tượng lệch trái ở tập nội trú:**
+- Để xử lý độ lệch cực đoan, biến đổi $\tilde{y} = \ln(y + 1)$ thường được áp dụng. Đối với dữ liệu ngoại trú, biến đổi này giúp giảm mạnh hệ số độ lệch từ +61.6 xuống còn **+0.39** (tiệm cận phân phối đối xứng, rất thuận lợi cho các mô hình hồi quy tuyến tính).
+- **Tuy nhiên**, đối với tập dữ liệu nội trú, biến đổi $\ln(y + 1)$ lại tạo ra hiện tượng **lệch trái (Negative Skewness)** với hệ số độ lệch đo được là **-2.54**. Nguyên nhân là do một nhóm nhỏ hồ sơ nội trú có chi phí bằng 0 hoặc rất nhỏ bị kéo dãn cách xa về phía giá trị âm sau hàm logarit, trong khi đa số các ca nội trú tập trung ở mức chi phí hàng chục nghìn USD. Đây là một phát hiện thực nghiệm quan trọng, cảnh báo rằng phép biến đổi logarit đơn thuần có thể không hoàn toàn lý tưởng cho toàn bộ các phân khúc dữ liệu, đòi hỏi phải cân nhắc các mô hình Tuyến tính Tổng quát (GLM) hoặc mô hình hai phần (Two-part model).
+
+**Hậu quả phương pháp luận:**
+Sự kết hợp giữa độ lệch phải cực đại và đuôi dày khiến dữ liệu vi phạm nghiêm trọng các giả định của mô hình Hồi quy Tuyến tính Cổ điển (OLS):
+- Các kiểm định chuẩn tắc (như Jarque–Bera, Shapiro–Wilk) trên mẫu thực nghiệm đều bác bỏ giả định sai số có phân phối chuẩn ở mức ý nghĩa $p < 0.001$.
+- Hiện tượng phương sai sai số thay đổi (Heteroscedasticity) diễn ra nghiêm trọng (được xác nhận qua kiểm định Breusch–Pagan): phương sai sai số dự báo có xu hướng tăng theo quy mô chi phí thực tế.
+- Các ước lượng OLS trên thang đo gốc bị chi phối nặng nề bởi một số lượng nhỏ các ca bệnh ngoại lai cực lớn, dẫn đến dự báo bị chệch và có thể cho ra giá trị dự báo âm phi lý đối với các hồ sơ chi phí thấp.
+
+### 2.1.3. Khái niệm và Phân biệt Nghiệp vụ Bồi thường Nội trú và Ngoại trú
+
+Trong hệ thống vận hành bảo hiểm y tế Medicare (Hoa Kỳ) cũng như bảo hiểm y tế hiện đại, hai nhóm nghiệp vụ khám chữa bệnh cốt lõi có sự khác biệt bản chất về cơ chế phát sinh chi phí, quy trình giám định và mức độ rủi ro:
+
+| Tiêu Chí So Sánh | Bồi Thường Khám Ngoại Trú (Outpatient Claims) | Bồi Thường Điều Trị Nội Trú (Inpatient Claims) |
+| :--- | :--- | :--- |
+| **Đặc thù nghiệp vụ** | Bệnh nhân khám lâm sàng, thực hiện xét nghiệm, chẩn đoán hình ảnh, nhận thuốc và **ra về trong ngày**. Không nằm viện qua đêm. | Bệnh nhân có chỉ định nhập viện chính thức, **lưu trú qua đêm** tại giường bệnh từ 1 ngày đến nhiều tuần để điều trị nội khoa hoặc phẫu thuật. |
+| **Cột mốc thời gian đặc trưng** | Chỉ phát sinh `ClaimStartDt` và `ClaimEndDt` (khoảng 91% hồ sơ có ngày bắt đầu và kết thúc trùng nhau hoặc cách nhau 1–3 ngày). | Bắt buộc ghi nhận `AdmissionDt` (ngày nhập viện) và `DischargeDt` (ngày xuất viện) để tính số ngày nằm viện (`LengthOfStay`). |
+| **Biến đặc thù quy định giá** | Mã thủ thuật y tế theo chuẩn **ICD-9-CM** (`ClmProcedureCode`, mã 2–4 chữ số trong dữ liệu Medicare 2008–2009). | Mã nhóm chẩn đoán thanh toán trọn gói (`DiagnosisGroupCode` - DRG) do cơ quan quản lý ban hành. |
+| **Quy mô mẫu dữ liệu thô** | **517,737** lượt hồ sơ (Chiếm tỷ trọng áp đảo về số lượng giao dịch). | **9,551** lượt hồ sơ (Chiếm tỷ trọng nhỏ về số lượt nhưng nắm giữ tỷ trọng chi phí khổng lồ). |
+| **Tần số (Frequency)** | Rất cao (Khoảng 66% người thụ hưởng có nhiều hơn 1 hồ sơ bồi thường trong năm). | Thấp (Chỉ xảy ra khi mắc biến cố sức khỏe nghiêm trọng hoặc cấp cứu). |
+| **Mức độ nghiêm trọng (Severity)** | Thấp: Giá trị trung vị là **80 USD**, giá trị bình quân là **2,558.34 USD**. | Rất cao: Giá trị trung vị là **8,000 USD**, giá trị bình quân lên tới **93,128.71 USD**. |
+| **Rủi ro nghiệp vụ trong mô hình** | Rủi ro rò rỉ dữ liệu bệnh nhân lặp lại (`BeneID`) giữa tập Train và Test nếu chia ngẫu nhiên theo dòng. | Rủi ro rò rỉ thông tin mục tiêu từ mã DRG và số ngày nằm viện nếu sử dụng làm biến dự báo sớm trước khi thẩm định. |
+| **Cơ chế thanh toán chuẩn** | Thanh toán theo nhóm dịch vụ ngoại trú triển vọng (Outpatient Prospective Payment System - OPPS) kết hợp biểu phí dịch vụ kỹ thuật. | Thanh toán theo nhóm chẩn đoán tương đương trọn gói (Inpatient Prospective Payment System - IPPS DRG). |
+
+: So sánh nghiệp vụ và đặc trưng dữ liệu giữa hồ sơ Ngoại trú và Nội trú. {#tbl-outpatient-inpatient}
+
+Sự phân định này chứng minh rằng việc xây dựng mô hình dự báo chi phí y tế cần phải cân nhắc kỹ lưỡng cấu trúc dữ liệu: hoặc phân tầng mô hình hóa riêng biệt theo loại hình điều trị, hoặc sử dụng loại hình điều trị (`ClaimType`) và các biến thời gian như những đặc trưng phân loại trọng yếu nhất.
+
+---
+
+## 2.2. Tổng quan các Nghiên cứu Thực nghiệm trước đây (Literature Review)
+
+Để xây dựng cơ sở phương pháp luận vững chắc cho đề tài, nhóm đã tiến hành khảo cứu có hệ thống 5 công trình khoa học quốc tế tiêu biểu trong lĩnh vực mô hình hóa chi phí y tế và bồi thường bảo hiểm:
+
+### 2.2.1. Phân tích Chi tiết 5 Công trình Nghiên cứu Tiêu biểu
+
+1. **Manning & Mullahy (2001) – *"Estimating log models: to transform or not to transform?"*, Journal of Health Economics, 20(4), 461–494. DOI: 10.1016/S0167-6296(01)00086-8.**
+   - *Bối cảnh & Phương pháp:* Nghiên cứu nền tảng phân tích so sánh giữa phương pháp hồi quy tuyến tính trên biến đổi logarit $\ln(y)$ (OLS log-cost model) và mô hình Hồi quy Tuyến tính Tổng quát GLM với hàm liên kết logarit ($\ln(\mathbb{E}[y]) = \mathbf{x}^T\boldsymbol{\beta}$).
+   - *Đóng góp cốt lõi:* Tác giả chỉ ra rằng khi biến đổi ngược từ không gian logarit về đơn vị tiền tệ gốc ($\hat{y} = \exp(\hat{\ln y})$), mô hình OLS sẽ tạo ra sai lệch biến đổi ngược nghiêm trọng (Retransformation Bias). Nếu phần dư có phương sai thay đổi (Heteroscedasticity) phụ thuộc vào biến độc lập $\mathbf{x}$, việc nhân hệ số hiệu chỉnh Smearing Estimator của Duan (1983) vẫn không loại bỏ được sai số hệ thống. Tác giả khuyến nghị sử dụng GLM với phân phối Gamma và hàm liên kết logarit để bảo toàn tính không thiên lệch của kỳ vọng chi phí y tế.
+
+2. **Bertsimas et al. (2008) – *"Algorithmic Prediction of Health Care Costs"*, Operations Research, 56(6), 1382–1392. DOI: 10.1287/opre.1080.0619.**
+   - *Bối cảnh & Phương pháp:* Ứng dụng các thuật toán cây phân loại và phân cụm (Classification and Regression Trees / Clustering) trên tập dữ liệu hồ sơ bồi thường bảo hiểm của hơn 800,000 người được bảo hiểm trong thời gian 3 năm tại Hoa Kỳ.
+   - *Đóng góp cốt lõi:* Nghiên cứu chứng minh rằng mối quan hệ giữa chi phí y tế và thông tin bệnh án mang tính phi tuyến tính cao. Các tác giả chỉ ra rằng các phương pháp cây quyết định và phân tầng rủi ro có khả năng nhận diện cấu trúc tương tác lâm sàng hiệu quả hơn các mô hình tuyến tính truyền thống trong việc phân nhóm người bệnh theo mức độ rủi ro chi phí.
+
+3. **Frees, Derrig & Meyers (Eds.) (2014) – *Predictive Modeling Applications in Actuarial Science (Volume 1: Predictive Modeling Techniques)*, Cambridge University Press. DOI: 10.1017/CBO9781139342674.**
+   - *Bối cảnh & Phương pháp:* Công trình chuyên khảo hệ thống hóa toàn diện các kỹ thuật mô hình hóa dự báo hiện đại ứng dụng trong khoa học tính toán bảo hiểm (Actuarial Science), trọng tâm là phân phối Tweedie hợp nhất (Compound Poisson-Gamma).
+   - *Đóng góp cốt lõi:* Mô hình Tweedie cho phép ước lượng trực tiếp biến tổn thất tổng $S$ mà không cần tách rời thành hai phương trình độc lập cho tần số $N$ và mức độ nghiêm trọng $X$. Bằng cách tham số hóa hàm phương sai $\text{Var}(Y) = \phi \mu^p$ với tham số công suất $1 < p < 2$, phân phối Tweedie giải quyết trọn vẹn hiện tượng lạm phát giá trị 0 (Zero-inflation) đồng thời với tính chất liên tục và lệch phải của các khoản bồi thường dương.
+
+4. **Duncan et al. (2016) – *"Testing alternative regression frameworks for predictive modeling of health care costs"*, North American Actuarial Journal, 20(1), 65–87. DOI: 10.1080/10920277.2015.1116670.**
+   - *Bối cảnh & Phương pháp:* So sánh thực nghiệm nhiều khung hồi quy thay thế gồm Lasso GLM, MARS (Multivariate Adaptive Regression Splines), Rừng ngẫu nhiên (Random Forest), Cây quyết định (Decision Tree) và Gradient Boosting trên bộ dữ liệu gồm 30,000 người được bảo hiểm với 2 năm liên tiếp hồ sơ bồi thường.
+   - *Đóng góp cốt lõi:* Nghiên cứu cung cấp bức tranh đối chiếu toàn diện giữa các phương pháp điều chuẩn tuyến tính và các thuật toán học máy phi tham số. Kết quả cho thấy các thuật toán ensemble có khả năng tự động nắm bắt các tương tác phức tạp giữa các mã bệnh án, đồng thời nhấn mạnh sự cần thiết của việc cân bằng giữa độ chính xác dự báo và tính giải thích được của mô hình trong môi trường thẩm định bảo hiểm.
+
+5. **Morid et al. (2017) – *"Supervised Learning Methods for Predicting Healthcare Costs: Systematic Literature Review and Empirical Evaluation"*, AMIA Annual Symposium Proceedings 2017, 1312–1321.**
+   - *Bối cảnh & Phương pháp:* Khảo cứu có hệ thống và đánh giá thực nghiệm các phương pháp học có giám sát (Hồi quy tuyến tính, Cây quyết định, Random Forest, Gradient Boosting, Support Vector Machines) trên dữ liệu bồi thường y tế lớn chứa mã chẩn đoán ICD và mã thủ thuật.
+   - *Đóng góp cốt lõi:* Nghiên cứu nhấn mạnh vai trò quyết định của khâu kỹ thuật tạo lập đặc trưng (Feature Engineering) và làm sạch dữ liệu đối với hiệu năng dự báo. Đáng chú ý, bài báo đưa ra cảnh báo nghiêm ngặt về hiện tượng rò rỉ dữ liệu (Data Leakage) khi phân chia tập Train/Test không đúng theo thực thể người bệnh hoặc để lộ các biến số chỉ được xác định sau quá trình điều trị vào tập biến giải thích.
+
+### 2.2.2. Ma trận Đối sánh Nghiên cứu Thực nghiệm
+
+| Tác Giả & Năm | Nguồn Dữ Liệu & Quy Mô Mẫu | Phương Pháp Tiếp Cận | Biến Số Trọng Yếu | Kết Quả Đạt Được | Điểm Hạn Chế |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Manning & Mullahy (2001)** | Khảo sát Chi tiêu Y tế Hoa Kỳ (MEPS) ($n \approx 20,000$) | OLS log-transform vs. GLM Gamma (log link) | Thu nhập, tuổi, bảo hiểm tư nhân, tình trạng sức khỏe | GLM Gamma vượt trội OLS khi có phương sai thay đổi; tránh sai lệch biến đổi ngược | Chưa thử nghiệm các mô hình học máy phi tuyến trên dữ liệu bồi thường lớn |
+| **Bertsimas et al. (2008)** | Dữ liệu Bồi thường Thương mại Mỹ ($n > 800,000$ người trong 3 năm) | Cây phân loại và phân cụm (Tree & Clustering) | Lịch sử bồi thường, mã chẩn đoán bệnh án, nhân khẩu | Nhận diện tương tác phi tuyến; phân tầng rủi ro bệnh nhân hiệu quả hơn mô hình tuyến tính | Chi phí tính toán huấn luyện cây trên tập dữ liệu quy mô lớn |
+| **Frees, Derrig & Meyers (Eds.) (2014)** | Dữ liệu Bồi thường Bảo hiểm Tổng hợp | Phân phối Tweedie Compound Poisson-Gamma GLM | Tần số tổn thất, mức nghiêm trọng, phân vùng rủi ro | Mô hình hóa thống nhất toàn bộ phân phối bao gồm cả các điểm giá trị 0 | Đòi hỏi kỹ thuật ước lượng tham số công suất $p$ phức tạp |
+| **Duncan et al. (2016)** | Dữ liệu Bồi thường Y tế ($n = 30,000$ người trong 2 năm) | Lasso GLM, MARS, Random Forest, Decision Tree, Boosting | Mã chẩn đoán, lịch sử chi phí, số lượt khám | So sánh thực nghiệm đa mô hình; làm rõ ưu thế của thuật toán cây trong tương tác đặc trưng | Cần cân đối tính diễn giải nghiệp vụ của các mô hình phi tuyến |
+| **Morid et al. (2017)** | Dữ liệu Hồ sơ Bồi thường Y tế Lớn | Tổng quan & Đánh giá: OLS, Tree, RF, Boosting, SVM | Mã chẩn đoán ICD, mã thủ thuật, lịch sử chi phí | Khẳng định vai trò của Feature Engineering; cảnh báo rủi ro Data Leakage | Phạm vi thực nghiệm tập trung vào dữ liệu tổng hợp, cần triển khai trên dữ liệu thực tế |
+
+: Bảng tổng hợp đối sánh các nghiên cứu thực nghiệm quốc tế tiêu biểu. {#tbl-literature-review}
+
+### 2.2.3. Khoảng trống Nghiên cứu (Research Gap) và Đóng góp của Đề tài
+
+Qua việc tổng quan các công trình trên, nhóm nhận diện hai khoảng trống nghiên cứu có thể tiếp tục đóng góp:
+
+1. **Thiếu sự so sánh đối chuẩn minh bạch đa lớp mô hình trên dữ liệu bồi thường lớn mở:** Đa phần các nghiên cứu trước hoặc chỉ tập trung vào mô hình kinh tế lượng truyền thống (OLS, GLM) trên mẫu khảo sát nhỏ, hoặc áp dụng máy học phức tạp trên dữ liệu thương mại đóng kín. Việc xây dựng một quy trình đối chuẩn minh bạch, đánh giá công bằng từ OLS cơ sở, GLM bảo hiểm chuyên dụng đến Ensemble hiện đại trên tập dữ liệu bồi thường lớn của hệ thống CMS Medicare là hết sức cần thiết.
+2. **Kiểm soát rò rỉ dữ liệu cấp bệnh nhân và tính kịp thời của biến số:** Trong nhiều nghiên cứu thực nghiệm, việc phân chia ngẫu nhiên dữ liệu theo dòng đơn thuần dễ dẫn đến rò rỉ thông tin người bệnh khi một bệnh nhân có nhiều lượt khám. Đồng thời, nguy cơ rò rỉ thông tin từ các biến số chỉ được xác định sau khi kết thúc đợt điều trị (như `DeductibleAmtPaid` hay `DiagnosisGroupCode`) thường chưa được phân tích thấu đáo trong bài toán dự báo sớm.
+
+**Đóng góp học thuật và thực tiễn của đề tài:**
+- Nhóm tiến hành tích hợp và làm sạch hai tệp hồ sơ bồi thường nội trú và ngoại trú (**527,288 bản ghi thô**) bằng biểu thức chính quy (Regex), loại bỏ triệt để các giá trị âm phi lý, xử lý đơn vị tiền tệ gắn vào chuỗi số và chuẩn hóa dữ liệu khuyết.
+- Thiết lập quy trình so sánh thực nghiệm công bằng giữa 4 lớp thuật toán đại diện: Tuyến tính OLS trên thang biến đổi logarit, Tuyến tính điều chuẩn (Ridge, Lasso), Tuyến tính Tổng quát (Gamma GLM và Tweedie GLM), và Thuật toán Cây quyết định Ensemble (Random Forest và Gradient Boosting: XGBoost / LightGBM).
+- Cung cấp bằng chứng thực nghiệm rõ ràng về vai trò của thời gian nằm viện (`LengthOfStay`), số lượng mã chẩn đoán (`Diagnosis_Count`), số lượng mã thủ thuật (`Procedure_Count`) và cơ sở y tế (`Provider`) đối với chi phí bồi thường, hỗ trợ doanh nghiệp bảo hiểm xây dựng biểu phí phân tầng rủi ro chính xác và quản trị quỹ tài chính an toàn.
+
+---
+
+## 2.3. Quy trình Khoa học Dữ liệu (CRISP-DM Workflow)
+
+### 2.3.1. Các Giai đoạn Thực thi Quy trình CRISP-DM Tinh chỉnh
+
+Để bảo đảm tính khoa học, chuẩn xác và khả năng ứng dụng thực tế, nghiên cứu áp dụng khung quy trình được **tinh chỉnh từ quy trình chuẩn CRISP-DM (Cross-Industry Standard Process for Data Mining - Chapman et al., 2000)** gồm 6 giai đoạn khép kín:
+
+```{mermaid}
+%%| label: fig-crisp-dm
+%%| fig-cap: "Sơ đồ Quy trình Khoa học Dữ liệu tinh chỉnh từ CRISP-DM cho Đề tài PRJ-04."
+flowchart TD
+    G1["<b>Giai đoạn 1: Thấu hiểu nghiệp vụ</b><br/>• Bài toán: Dự báo chi phí bồi thường y tế cá nhân<br/>• Mục tiêu: Tối ưu R², RMSE, MAE, MAPE; hỗ trợ định phí"] --> G2
+    G2["<b>Giai đoạn 2: Thấu hiểu dữ liệu</b><br/>• Khảo sát 2 tệp CMS: Outpatient (517,737) & Inpatient (9,551)<br/>• Định danh: ClaimID (PK); BeneID, Provider, Bác sĩ (Tham chiếu)<br/>• Kiểm toán chất lượng: Ký tự thiếu, số âm, đơn vị gắn vào số, ngày cắt"] --> G3
+    G3["<b>Giai đoạn 3: Chuẩn bị dữ liệu</b><br/>• Regex loại bỏ ký tự đơn vị tiền tệ, chuẩn hóa chuỗi và datetime<br/>• Ghép dọc bằng pd.concat với cờ phân loại ClaimType<br/>• Phân chia Train/Test theo BeneID (GroupShuffleSplit chống rò rỉ)<br/>• Điền khuyết và chuẩn hóa trong Pipeline sau khi chia"] --> G4
+    G4["<b>Giai đoạn 4: Kỹ thuật đặc trưng & Kiểm định</b><br/>• Đặc trưng: ClaimDuration, LengthOfStay, Diagnosis_Count, Procedure_Count<br/>• Biến cờ bác sĩ phẫu thuật/hỗ trợ, tháng hồ sơ, thống kê theo Provider<br/>• Kiểm định Welch / Mann-Whitney, ANOVA / Kruskal-Wallis, Spearman<br/>• Biến đổi logarit ln(y+1) xử lý phân phối lệch"] --> G5
+    G5["<b>Giai đoạn 5: Huấn luyện mô hình học máy</b><br/>• Huấn luyện 4 lớp mô hình: OLS, Ridge/Lasso, GLM (Gamma/Tweedie), RF & Boosting<br/>• Tối ưu hóa siêu tham số bằng 5-Fold Cross-Validation trên Train Set"] --> G6
+    G6["<b>Giai đoạn 6: Đánh giá hiệu năng & Triển khai</b><br/>• Đánh giá khách quan trên Test Set: R², RMSE, MAE, MAPE<br/>• Phân tích Feature Importance & Khuyến nghị quản trị rủi ro bồi thường"]
+```
+
+Chi tiết các bước thực hiện trong từng giai đoạn:
+
+1. **Giai đoạn 1: Thấu hiểu Nghiệp vụ (Business Understanding):**
+   Xác định bài toán dự báo tổng số tiền bồi thường bảo hiểm y tế chấp thuận thanh toán (`InscClaimAmtReimbursed`) cho từng hồ sơ khám chữa bệnh. Mục tiêu kỹ thuật là tối ưu hóa độ chính xác ($R^2$, RMSE, MAE, MAPE) đồng thời kiểm soát độ lệch hệ thống (Bias) nhằm hỗ trợ doanh nghiệp định phí bảo hiểm (Actuarial Pricing) và trích lập quỹ dự phòng nghiệp vụ.
+2. **Giai đoạn 2: Thấu hiểu Dữ liệu (Data Understanding):**
+   Khảo sát hai tệp dữ liệu bồi thường thô gồm Ngoại trú (517,737 dòng, 27 cột) và Nội trú (9,551 dòng, 30 cột). Xác định `ClaimID` là khóa chính đại diện cho một giao dịch yêu cầu bồi thường (lưu ý dữ liệu thô bị khuyết khoảng 19–23% `ClaimID` cần được làm sạch và xử lý); các trường `BeneID`, `Provider` và mã bác sĩ (`AttendingPhysician`, `OperatingPhysician`, `OtherPhysician`) đóng vai trò là các mã định danh tham chiếu. Tiến hành kiểm toán chất lượng dữ liệu: phát hiện lỗi chèn đơn vị tiền tệ, giá trị số âm, khoảng trắng thừa và lỗi ngày tháng.
+3. **Giai đoạn 3: Chuẩn bị Dữ liệu (Data Preparation):**
+   Thực thi làm sạch chuỗi bằng biểu thức chính quy (Regex), đưa các ký tự giả khuyết về `NaN`, chuẩn hóa chữ hoa và khoảng trắng `.str.strip().str.upper()`, chuyển đổi các trường ngày tháng về `to_datetime`. Ghép dọc hai tệp bằng `pd.concat` theo các cột chung và bổ sung cột phân loại `ClaimType` ('Outpatient' vs. 'Inpatient'). Đặc biệt, để ngăn ngừa rò rỉ dữ liệu (Data Leakage), toàn bộ quy trình điền khuyết và chuẩn hóa thang đo được đóng gói trong Scikit-learn Pipeline sau khi đã chia tập Train và Test.
+4. **Giai đoạn 4: Kỹ thuật Đặc trưng & Kiểm định Giả thuyết (Feature Engineering & Hypothesis Testing):**
+   Trích xuất các đặc trưng mới từ các trường dữ liệu có sẵn: thời gian đợt yêu cầu bồi thường (`ClaimDuration = ClaimEndDt - ClaimStartDt + 1`), thời gian nằm viện nội trú (`LengthOfStay = DischargeDt - AdmissionDt`), số lượng mã chẩn đoán ghi nhận (`Diagnosis_Count` từ 1 đến 10), số lượng mã thủ thuật thực hiện (`Procedure_Count` từ 0 đến 6), các biến cờ chỉ thị có bác sĩ phẫu thuật (`Has_OperatingPhysician`) và bác sĩ hỗ trợ (`Has_OtherPhysician`), tháng phát sinh hồ sơ (`Claim_Month`), và nhóm chẩn đoán chính (3 ký tự đầu mã ICD-9-CM). Thực hiện các kiểm định thống kê y tế tương ứng và biến đổi logarit $\ln(y + 1)$ cho biến mục tiêu.
+5. **Giai đoạn 5: Huấn luyện Mô hình Học máy (Modeling Pipeline):**
+   Phân chia dữ liệu theo nhóm người bệnh (`BeneID`) bằng `GroupShuffleSplit` (80% Train, 20% Test) để đảm bảo không lẫn hồ sơ của cùng một bệnh nhân giữa hai tập. Huấn luyện 4 lớp thuật toán đã thống nhất: OLS trên logarit, Ridge & Lasso điều chuẩn, GLM Gamma & Tweedie, cùng Random Forest và Gradient Boosting (XGBoost / LightGBM) kết hợp kiểm định chéo 5-Fold CV trên tập Train.
+6. **Giai đoạn 6: Đánh giá Hiệu năng & Khuyến nghị Ứng dụng (Evaluation & Strategy):**
+   Đánh giá toàn diện trên tập Test độc lập thông qua bộ 4 chỉ số $R^2$, RMSE, MAE, MAPE. Phân tích tầm quan trọng của các đặc trưng (Feature Importance) và đề xuất các khuyến nghị định phí và kiểm soát bồi thường cho doanh nghiệp bảo hiểm.
+
+### 2.3.2. Sơ đồ Khái niệm Kiến trúc Dữ liệu Bồi thường (Conceptual Claims Data Architecture)
+
+Theo khung phân bổ nội dung của đồ án, toàn bộ chi tiết Bảng Từ điển dữ liệu 30 biến số chuẩn và kết quả kiểm toán chất lượng làm sạch chi tiết sẽ được trình bày cụ thể tại **Chương 3.1** ("Mô tả nguồn gốc và cấu trúc tập dữ liệu"). Trong Chương 2, nhóm thiết lập Sơ đồ khái niệm kiến trúc dữ liệu bồi thường để định vị các luồng quan hệ thuộc tính phục vụ mô hình hóa:
+
+```{mermaid}
+%%| label: fig-claims-arch
+%%| fig-cap: "Sơ đồ Khái niệm Kiến trúc Dữ liệu Hồ sơ Bồi thường CMS Claims."
+flowchart TD
+    subgraph CLAIMS["HỒ SƠ YÊU CẦU BỒI THƯỜNG BẢO HIỂM Y TẾ (CMS CLAIMS)"]
+        direction TB
+        C1["<b>Khóa chính (PK): ClaimID</b><br/><i>(Định danh duy nhất từng giao dịch; thiếu 19-23% trong dữ liệu thô, cần làm sạch)</i>"]
+        C2["<b>Biến mục tiêu (Target): InscClaimAmtReimbursed</b><br/><i>(Số tiền bảo hiểm chấp thuận chi trả bồi hoàn, Y ≥ 0)</i>"]
+        C3["<b>Mã tham chiếu liên kết (Reference Attributes):</b><br/>• BeneID: Mã người thụ hưởng bảo hiểm<br/>• Provider: Mã cơ sở y tế / Bệnh viện điều trị<br/>• Mã bác sĩ: AttendingPhysician, OperatingPhysician, OtherPhysician"]
+        C4["<b>Thuộc tính lâm sàng & Thủ thuật:</b><br/>• ClmAdmitDiagnosisCode & ClmDiagnosisCode_1 đến _10 (Mã ICD-9-CM)<br/>• ClmProcedureCode_1 đến _6 (Mã thủ thuật ICD-9-CM)"]
+    end
+
+    subgraph OUTPATIENT["KHÁM NGOẠI TRÚ (Outpatient)"]
+        O1["517,737 bản ghi thô, 27 cột<br/>• ClaimStartDt, ClaimEndDt (thường trùng ngày)<br/>• Chi phí trung vị: 80 USD<br/>• Thủ thuật phần lớn không phát sinh"]
+    end
+
+    subgraph INPATIENT["ĐIỀU TRỊ NỘI TRÚ (Inpatient)"]
+        I1["9,551 bản ghi thô, 30 cột<br/>• AdmissionDt, DischargeDt (tính LengthOfStay)<br/>• DiagnosisGroupCode (DRG thanh toán trọn gói)<br/>• Chi phí trung vị: 8,000 USD<br/>• Thủ thuật & phẫu thuật phát sinh phổ biến"]
+    end
+
+    CLAIMS --> OUTPATIENT
+    CLAIMS --> INPATIENT
+```
+
+Sơ đồ trên làm rõ rằng dữ liệu nghiên cứu chỉ gồm 2 tệp bồi thường (Outpatient và Inpatient); các thông tin về người bệnh (`BeneID`), bệnh viện (`Provider`) và bác sĩ được lưu giữ dưới dạng các trường thuộc tính tham chiếu trong từng hồ sơ bồi thường mà không có các bảng danh mục độc lập đi kèm.
+
+---
+
+## 2.4. Các Phương pháp Thống kê và Thuật toán Học máy Ứng dụng
+
+### 2.4.1. Kỹ thuật Xử lý Phân phối Lệch: Phép biến đổi Logarit Tự nhiên và Hiệu chỉnh Smearing
+
+Để khắc phục hiện tượng lệch phải cực đại của dữ liệu ngoại trú ($\gamma_1 = +61.6$), biến mục tiêu chi phí bồi thường $y$ được làm mượt bằng hàm logarit tự nhiên cộng 1 (nhằm xử lý các hồ sơ có chi phí bằng 0):
+
+$$\tilde{y} = \ln(y + 1) = \text{np.log1p}(y)$$
+
+Sau khi mô hình đưa ra giá trị dự báo trong không gian logarit $\hat{\tilde{y}}$, giá trị dự báo trên thang đo USD gốc được phục hồi bằng hàm mũ nghịch đảo:
+
+$$\hat{y} = \exp(\hat{\tilde{y}}) - 1 = \text{np.expm1}(\hat{\tilde{y}})$$
+
+Tuy nhiên, do bất đẳng thức Jensen ($\mathbb{E}[\exp(Z)] \ge \exp(\mathbb{E}[Z])$), việc lấy hàm mũ trực tiếp của giá trị dự báo logarit sẽ dẫn đến hiện tượng ước lượng dưới mức chi phí kỳ vọng thực tế (Retransformation Bias). Đối với mô hình hồi quy tuyến tính OLS, nhóm áp dụng hệ số hiệu chỉnh phi tham số **Smearing Estimator (Duan, 1983)** được điều chỉnh cho phép biến đổi $\ln(y + 1)$:
+
+$$\hat{y}_{\text{smear}} = \exp(\mathbf{x}^T \hat{\boldsymbol{\beta}}) \times \left( \frac{1}{n}\sum_{i=1}^n \exp(\hat{e}_i) \right) - 1$$
+
+trong đó $\hat{e}_i = \tilde{y}_i - \mathbf{x}_i^T\hat{\boldsymbol{\beta}}$ là phần dư logarit của quan sát thứ $i$.
+
+### 2.4.2. Mô hình Hồi quy Tuyến tính Cổ điển (OLS - Ordinary Least Squares)
+
+Mô hình hồi quy tuyến tính đa biến giả định mối quan hệ giữa biến phụ thuộc $\tilde{y}$ và $p$ đặc trưng độc lập $\mathbf{x} = (x_1, x_2, \dots, x_p)^T$ có dạng:
+
+$$\tilde{y}_i = \beta_0 + \sum_{j=1}^p \beta_j x_{ij} + \varepsilon_i = \mathbf{x}_i^T \boldsymbol{\beta} + \varepsilon_i$$
+
+với giả định $\varepsilon_i \overset{iid}{\sim} \mathcal{N}(0, \sigma^2)$. Vector hệ số ước lượng $\hat{\boldsymbol{\beta}}_{\text{OLS}}$ được xác định bằng cách cực tiểu hóa tổng bình phương phần dư (Residual Sum of Squares - RSS):
+
+$$\hat{\boldsymbol{\beta}}_{\text{OLS}} = \arg\min_{\boldsymbol{\beta}} \sum_{i=1}^n (\tilde{y}_i - \mathbf{x}_i^T \boldsymbol{\beta})^2 = (\mathbf{X}^T \mathbf{X})^{-1} \mathbf{X}^T \tilde{\mathbf{y}}$$
+
+Mô hình OLS trên biến đổi logarit đóng vai trò là mô hình đường cơ sở (Baseline Model) để đo lường mức độ cải thiện của các thuật toán nâng cao.
+
+### 2.4.3. Mô hình Tuyến tính Tổng quát (GLM: Gamma & Tweedie)
+
+Khung lý thuyết **Mô hình Tuyến tính Tổng quát (GLM - Nelder & Wedderburn, 1972)** mở rộng hồi quy tuyến tính bằng cách giả định biến mục tiêu $Y$ thuộc Họ Hàm mũ Phân tán (Exponential Dispersion Family):
+
+$$f(y; \theta, \phi) = \exp\left( \frac{y\theta - b(\theta)}{a(\phi)} + c(y, \phi) \right)$$
+
+với kỳ vọng $\mu = \mathbb{E}[Y \mid \mathbf{X}] = b'(\theta)$ và phương sai $\text{Var}(Y \mid \mathbf{X}) = a(\phi) b''(\theta) = \phi V(\mu)$, trong đó $V(\mu)$ là hàm phương sai (Variance Function). Mối quan hệ giữa kỳ vọng $\mu$ và tổ hợp tuyến tính được thiết lập qua hàm liên kết $g(\cdot)$:
+
+$$g(\mu_i) = \mathbf{x}_i^T \boldsymbol{\beta} \iff \mu_i = g^{-1}(\mathbf{x}_i^T \boldsymbol{\beta})$$
+
+1. **Mô hình Gamma GLM (với Log-Link):**
+   - Hàm phương sai: $V(\mu) = \mu^2 \implies \text{Var}(Y) = \phi \mu^2$. Độ lệch chuẩn tỷ lệ thuận với mức chi phí kỳ vọng.
+   - Hàm liên kết logarit: $g(\mu) = \ln(\mu) = \mathbf{x}^T \boldsymbol{\beta} \implies \mu = \exp(\mathbf{x}^T \boldsymbol{\beta})$.
+   - Ưu điểm: Ước lượng trực tiếp $\mathbb{E}[Y \mid \mathbf{X}]$ trên thang tiền USD mà không chịu sai lệch biến đổi ngược như OLS log-transform.
+   - *Xử lý điều kiện giá trị 0:* Gamma GLM đòi hỏi biến mục tiêu strictly positive ($Y > 0$). Trong dữ liệu Medicare có 2.6% đến 3.8% hồ sơ bằng 0. Trong thực nghiệm, nhóm áp dụng giải pháp ước lượng Gamma GLM trên tập hồ sơ có chi phí dương ($y > 0$), hoặc kết hợp trong mô hình hai phần (Two-part model: bước 1 dùng Hồi quy Logistic dự báo xác suất $y > 0$, bước 2 dùng Gamma GLM dự báo mức chi phí).
+
+2. **Mô hình Tweedie Compound Poisson-Gamma GLM:**
+   - Hàm phương sai tổng quát: $V(\mu) = \mu^p$.
+   - Khi tham số công suất $p \in (1, 2)$, Tweedie là một phân phối hợp nhất (Compound Poisson-Gamma):
+     $$Y = \sum_{j=1}^N X_j, \quad N \sim \text{Poisson}(\lambda), \quad X_j \sim \text{Gamma}(\alpha, \gamma)$$
+   - Phân phối Tweedie giải quyết trọn vẹn hiện tượng lạm phát giá trị 0 đồng thời với tính chất liên tục và lệch phải của các khoản bồi thường dương trong một phương trình ước lượng duy nhất mà không cần tách rời dữ liệu.
+
+### 2.4.4. Hồi quy Điều chuẩn Ridge ($L_2$) và Lasso ($L_1$)
+
+Trong bài toán bồi thường y tế, các biến phân loại như mã cơ sở y tế `Provider` (hàng nghìn bệnh viện), các nhóm mã chẩn đoán ICD-9-CM và mã thủ thuật khi được mã hóa sẽ tạo ra không gian đặc trưng lớn với nguy cơ đa cộng tuyến (Multicollinearity) cao. Hai kỹ thuật điều chuẩn (Regularization) được áp dụng:
+
+1. **Hồi quy Ridge ($L_2$ Regularization - Hoerl & Kennard, 1970):**
+   Thêm số hạng phạt bình phương Euclidean của các hệ số vào hàm mất mát:
+   $$\mathcal{L}_{\text{Ridge}}(\boldsymbol{\beta}) = \frac{1}{2n} \sum_{i=1}^n (\tilde{y}_i - \mathbf{x}_i^T \boldsymbol{\beta})^2 + \lambda \sum_{j=1}^p \beta_j^2 = \frac{1}{2n} \|\tilde{\mathbf{y}} - \mathbf{X}\boldsymbol{\beta}\|_2^2 + \lambda \|\boldsymbol{\beta}\|_2^2$$
+   Nghiệm đóng giải tích:
+   $$\hat{\boldsymbol{\beta}}_{\text{Ridge}} = (\mathbf{X}^T \mathbf{X} + 2n\lambda \mathbf{I})^{-1} \mathbf{X}^T \tilde{\mathbf{y}}$$
+   Tác dụng: Co cụm các hệ số về gần 0, làm ổn định ma trận nghịch đảo $(\mathbf{X}^T\mathbf{X})^{-1}$ khi các biến giải thích có độ tương quan cao.
+
+2. **Hồi quy Lasso ($L_1$ Regularization - Tibshirani, 1996):**
+   Thêm số hạng phạt giá trị tuyệt đối:
+   $$\mathcal{L}_{\text{Lasso}}(\boldsymbol{\beta}) = \frac{1}{2n} \sum_{i=1}^n (\tilde{y}_i - \mathbf{x}_i^T \boldsymbol{\beta})^2 + \lambda \sum_{j=1}^p |\beta_j| = \frac{1}{2n} \|\tilde{\mathbf{y}} - \mathbf{X}\boldsymbol{\beta}\|_2^2 + \lambda \|\boldsymbol{\beta}\|_1$$
+   Tác dụng: Do hình dạng góc nhọn của khối cầu chuẩn $L_1$, Lasso có khả năng triệt tiêu chính xác các hệ số của các biến không quan trọng về đúng bằng 0 ($\beta_j = 0$), từ đó thực hiện lựa chọn đặc trưng tự động (Sparse Feature Selection).
+
+### 2.4.5. Thuật toán Rừng Ngẫu nhiên (Random Forest Regressor)
+
+Random Forest (Breiman, 2001) là thuật toán học máy tổ hợp (Ensemble Learning) hoạt động dựa trên nguyên lý **Bagging (Bootstrap Aggregating)** kết hợp ngẫu nhiên hóa không gian đặc trưng:
+
+1. Từ tập huấn luyện ban đầu kích thước $N$, rút ngẫu nhiên có hoàn lại $B$ mẫu con Bootstrap $\mathcal{D}_1, \mathcal{D}_2, \dots, \mathcal{D}_B$.
+2. Với mỗi mẫu $\mathcal{D}_b$, phát triển một cây hồi quy sâu $T_b(\mathbf{x})$. Tại mỗi nút phân nhánh, chỉ chọn ngẫu nhiên một tập con gồm $m$ đặc trưng ($m \approx \sqrt{p}$ hoặc $p/3$) để tìm điểm cắt tối ưu theo tiêu chí giảm phương sai phần dư (Mean Squared Error Reduction):
+   $$\Delta \text{MSE} = \text{MSE}_{\text{node}} - \left( \frac{N_L}{N} \text{MSE}_L + \frac{N_R}{N} \text{MSE}_R \right)$$
+3. Dự báo cuối cùng là trung bình cộng của toàn bộ $B$ cây:
+   $$\hat{y}_{\text{RF}}(\mathbf{x}) = \frac{1}{B}\sum_{b=1}^B T_b(\mathbf{x})$$
+
+**Đặc tính đối với dữ liệu bồi thường y tế:**
+- Không đòi hỏi bất kỳ giả định nào về phân phối của dữ liệu và phần dư.
+- Tự động nắm bắt các mối quan hệ phi tuyến tính và các tương tác phức tạp giữa thời gian nằm viện, số mã chẩn đoán, số thủ thuật và nhóm cơ sở y tế mà không cần khai báo thủ công.
+- Thuật toán bền vững trước các điểm ngoại lai ở không gian biến giải thích $\mathbf{X}$ nhờ phép chia nhánh dựa trên thứ tự giá trị. Tuy nhiên, ở biến mục tiêu $Y$, do hàm mất mát bình phương (MSE) lấy giá trị trung bình tại mỗi lá, các giá trị tổn thất thảm họa cực lớn vẫn có thể kéo lệch dự báo; do đó việc huấn luyện trên biến đổi logarit $\ln(y + 1)$ hoặc áp dụng các tham số giới hạn độ sâu cây (`max_depth`, `min_samples_leaf`) là cần thiết.
+
+### 2.4.6. Thuật toán Gradient Boosting (XGBoost / LightGBM)
+
+Khác với Random Forest xây dựng các cây độc lập song song, **Gradient Boosting (Friedman, 2001)** xây dựng các cây quyết định một cách tuần tự (Sequential Boosting). Mỗi cây mới được huấn luyện để bù trừ sai số phần dư (Gradient âm của hàm mất mát) mà tổ hợp các cây trước đó chưa giải thích được:
+
+$$F_0(\mathbf{x}) = \arg\min_{\gamma} \sum_{i=1}^n \mathcal{L}(y_i, \gamma)$$
+
+Tại mỗi vòng lặp $m = 1, 2, \dots, M$:
+1. Tính toán phần dư giả (Pseudo-residuals / Gradient âm):
+   $$r_{im} = -\left[ \frac{\partial \mathcal{L}(y_i, F(\mathbf{x}_i))}{\partial F(\mathbf{x}_i)} \right]_{F = F_{m-1}}$$
+2. Khớp một cây quyết định hồi quy $h_m(\mathbf{x})$ trên tập dữ liệu $\{(\mathbf{x}_i, r_{im})\}_{i=1}^n$.
+3. Cập nhật mô hình tích lũy với tốc độ học (Learning Rate - $\eta \in (0, 1]$):
+   $$F_m(\mathbf{x}) = F_{m-1}(\mathbf{x}) + \eta \cdot h_m(\mathbf{x})$$
+
+Các thư viện hiện đại như **XGBoost (Chen & Guestrin, 2016)** bổ sung số hạng phạt điều chuẩn cấu trúc cây $\Omega(h) = \gamma T + \frac{1}{2}\lambda \sum w_j^2$, trong khi **LightGBM (Ke et al., 2017)** sử dụng cơ chế phát triển cây theo lá (Leaf-wise split) và kỹ thuật GOSS (Gradient-based One-Side Sampling), giúp tối ưu hóa vượt bậc tốc độ huấn luyện trên tập dữ liệu hàng trăm nghìn dòng.
+
+### 2.4.7. Kiểm soát Rò rỉ Dữ liệu (Data Leakage) và Chiến lược Phân chia Mẫu
+
+Nghiên cứu đặc biệt chú trọng nhận diện và kiểm soát các rủi ro rò rỉ dữ liệu tiềm ẩn:
+
+1. **Rò rỉ dữ liệu cấp bệnh nhân (`BeneID`):**
+   Trong tập dữ liệu khám ngoại trú, khoảng **66% người thụ hưởng (`BeneID`) có nhiều hơn 1 hồ sơ bồi thường** trong kỳ khảo sát. Nếu phân chia tập Train (80%) và Test (20%) ngẫu nhiên theo từng dòng giao dịch (`train_test_split`), các hồ sơ của cùng một bệnh nhân sẽ xuất hiện ở cả hai tập, khiến mô hình học thuộc đặc điểm cá nhân thay vì học quy luật tổng quát. Do đó, nghiên cứu áp dụng chiến lược phân chia theo nhóm người bệnh bằng `GroupShuffleSplit` (hoặc `GroupKFold`) dựa trên cột `BeneID`.
+2. **Rủi ro rò rỉ từ các biến phát sinh sau thẩm định:**
+   - `DeductibleAmtPaid` (số tiền khấu trừ người bệnh tự chi trả): Được xác định đồng thời với số tiền bồi hoàn sau khi hồ sơ bồi thường được thẩm định chi phí. Nếu đưa trực tiếp biến này vào mô hình dự báo sớm trước khi xét duyệt, mô hình có thể bị rò rỉ thông tin về tổng quy mô chi phí của đợt điều trị. Do đó, cần thảo luận rủi ro này và xem xét thử nghiệm mô hình khi có và không có biến này.
+   - `DiagnosisGroupCode` (mã nhóm chẩn đoán DRG trong hồ sơ nội trú): Mã này được gán sau khi bệnh nhân xuất viện và quyết định trực tiếp khung thanh toán trọn gói IPPS. Mối liên hệ cơ học chặt chẽ này có thể khiến mô hình "học vẹt" mã thanh toán thay vì nhận diện rủi ro từ bệnh cảnh lâm sàng. Nhóm sẽ thảo luận sâu về tác động của DRG trong Chương 4 và Chương 5.
+
+### 2.4.8. Các Phương pháp Kiểm định Thống kê Ứng dụng
+
+Trước khi đưa các biến vào mô hình học máy, nhóm thực hiện các kiểm định thống kê phù hợp với dữ liệu thực tế để kiểm tra ý nghĩa lâm sàng và hành vi điều trị:
+
+1. **Kiểm định so sánh chi phí theo Can thiệp Thủ thuật và Loại hình Điều trị:**
+   - Nhóm thực hiện kiểm định **Welch's $t$-test trên thang đo logarit $\ln(y + 1)$** (hoặc kiểm định phi tham số Mann–Whitney U trên thang đo gốc) để so sánh:
+     - Mức chi phí bồi thường giữa nhóm có thực hiện thủ thuật y tế (`Procedure_Count > 0`) và nhóm không có thủ thuật (`Procedure_Count = 0`).
+     - Mức chi phí bồi thường giữa nhóm Điều trị Nội trú (`ClaimType = Inpatient`) và Khám Ngoại trú (`ClaimType = Outpatient`).
+   - Công thức kiểm định Welch's $t$-test không đòi hỏi giả định bằng nhau về phương sai:
+     $$t = \frac{\bar{Y}_1 - \bar{Y}_2}{\sqrt{\frac{s_1^2}{n_1} + \frac{s_2^2}{n_2}}}$$
+     với bậc tự do hiệu chỉnh Welch–Satterthwaite:
+     $$\nu \approx \frac{\left(\frac{s_1^2}{n_1} + \frac{s_2^2}{n_2}\right)^2}{\frac{(s_1^2/n_1)^2}{n_1 - 1} + \frac{(s_2^2/n_2)^2}{n_2 - 1}}$$
+     Giả thuyết: $H_0: \mu_1 = \mu_2$ so với $H_1: \mu_1 \ne \mu_2$.
+2. **Phân tích Phương sai theo Số lượng Mã Chẩn đoán (One-Way ANOVA / Kruskal–Wallis):**
+   - Kiểm định sự khác biệt về chi phí bồi thường giữa các nhóm số lượng mã chẩn đoán ghi nhận trong hồ sơ (`Diagnosis_Count`: 1 mã, 2 mã, 3 mã, $\ge 4$ mã chẩn đoán).
+   - Do chi phí lệch mạnh, kiểm định One-Way ANOVA được thực hiện trên thang logarit $\ln(y + 1)$, kết hợp kiểm định phi tham số Kruskal–Wallis để đối soát tính bền vững:
+     $$H = \frac{12}{N(N+1)} \sum_{j=1}^k \frac{R_j^2}{n_j} - 3(N+1)$$
+     với $R_j$ là tổng thứ hạng của nhóm thứ $j$. Giả thuyết: $H_0$: Phân phối chi phí bồi thường đồng nhất giữa các nhóm số lượng mã chẩn đoán; $H_1$: Có ít nhất một nhóm có mức chi phí khác biệt ($p < 0.05$).
+3. **Kiểm định Tương quan Hạng Spearman giữa Thời gian Nằm viện (`LengthOfStay`) và Chi phí Bồi thường Nội trú:**
+   - Do số ngày nằm viện (`LengthOfStay = DischargeDt - AdmissionDt`) và chi phí bồi thường nội trú đều có phân phối lệch và xuất hiện ngoại lai, hệ số tương quan phi tham số Spearman ($\rho$) được sử dụng để đánh giá mối quan hệ đơn điệu:
+     $$\rho = 1 - \frac{6 \sum_{i=1}^n d_i^2}{n(n^2 - 1)}$$
+     với $d_i = \text{rank}(X_i) - \text{rank}(Y_i)$. Giả thuyết: $H_0: \rho = 0$ so với $H_1: \rho > 0$ (thời gian nằm viện càng dài thì mức chi trả bồi thường càng lớn).
+
+### 2.4.9. Hệ thống Chỉ số Đo lường và Đánh giá Hiệu năng Mô hình
+
+Hiệu năng dự báo của các mô hình trên tập kiểm tra độc lập (Hold-out Test Set) được lượng hóa thông qua 4 thước đo chuẩn quốc tế:
+
+| Chỉ Số | Tên Tiếng Anh | Công Thức Toán Học | Ý Nghĩa Kinh Tế & Thống Kê |
+| :---: | :--- | :---: | :--- |
+| **$R^2$** | Coefficient of Determination | $R^2 = 1 - \frac{\sum_{i=1}^n (y_i - \hat{y}_i)^2}{\sum_{i=1}^n (y_i - \bar{y})^2}$ | Tỷ lệ biến thiên của chi phí bồi thường được mô hình giải thích ($R^2 \in [0, 1]$). Càng gần 1 mô hình càng mạnh. |
+| **RMSE** | Root Mean Squared Error | $\text{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^n (y_i - \hat{y}_i)^2}$ | Đo lường độ lệch trung phương gốc tính bằng đơn vị USD. Phạt rất nặng các sai số lớn, phù hợp đánh giá rủi ro tổn thất thảm họa. |
+| **MAE** | Mean Absolute Error | $\text{MAE} = \frac{1}{n}\sum_{i=1}^n \|y_i - \hat{y}_i\|$ | Đo mức sai số tuyệt đối trung bình tính bằng đơn vị USD. Bền vững trước ngoại lai, phản ánh sai lệch chi trả bình quân mỗi hồ sơ. |
+| **MAPE** | Mean Absolute Percentage Error | $\text{MAPE} = \frac{100\%}{n}\sum_{i=1}^n \left\| \frac{y_i - \hat{y}_i}{y_i} \right\|$ | Tỷ lệ phần trăm sai số tương đối so với mức bồi thường thực tế. Chỉ tính toán trên các hồ sơ có chi phí thực $y_i > 0$. |
+
+: Bảng tổng hợp công thức và ý nghĩa các thước đo hiệu năng mô hình. {#tbl-metrics}
+
+---
+
+## 2.5. Môi trường Thực nghiệm và Hệ sinh thái Thư viện Lập trình Python
+
+### 2.5.1. Cấu hình Môi trường Phần cứng & Hệ điều hành
+
+Toàn bộ các phân tích thống kê, làm sạch chuỗi, tiền xử lý và huấn luyện mô hình học máy được triển khai trên môi trường điện toán đồng nhất:
+- **Hệ điều hành:** Microsoft Windows 11 Home / Pro 64-bit.
+- **Môi trường phát triển tích hợp:** Antigravity IDE kết hợp Jupyter Interactive Lab và Quarto Scientific Publishing Engine (Phiên bản Quarto CLI 1.6.42).
+- **Bộ thông dịch (Interpreter):** Python phiên bản **3.12.10** (64-bit).
+- **Năng lực phần cứng thực nghiệm:** Vi xử lý đa nhân đa luồng (Multi-core CPU x64), tổng dung lượng bộ nhớ RAM đạt **24 GB** (23.7 GB khả dụng), đảm bảo khả năng nạp trực tiếp toàn bộ 527,288 dòng dữ liệu vào bộ nhớ để xử lý vector hóa mà không gặp sự cố tràn RAM (Out-Of-Memory).
+
+### 2.5.2. Hệ sinh thái Thư viện Khoa học Dữ liệu Python Chuyên dụng
+
+| Nhóm Chức Năng | Tên Thư Viện | Phiên Bản Thực Tế | Vai Trò & Nghiệp Vụ Cụ Thể Trong Đồ Án |
+| :--- | :--- | :---: | :--- |
+| **Cấu trúc dữ liệu & Tính toán số học** | `pandas` | 3.0.5 | Đọc nạp file CSV dung lượng lớn (`low_memory=False`), xử lý DataFrame, ghép dọc hai tệp (`pd.concat`) kèm biến phân loại `ClaimType`, xử lý Regex và lọc dữ liệu. |
+| | `numpy` | 2.5.3 | Thao tác mảng số học nhiều chiều, thực thi các phép biến đổi vector hóa phi tuyến (`np.log1p`, `np.expm1`), tính toán phân vị và đại số tuyến tính. |
+| **Thống kê toán & Kiểm định giả thuyết** | `scipy` | 1.18.1 | Thực thi kiểm định Welch's $t$-test (`stats.ttest_ind`), Mann–Whitney U (`stats.mannwhitneyu`), One-Way ANOVA (`stats.f_oneway`), Kruskal–Wallis (`stats.kruskal`), Spearman rank correlation (`stats.spearmanr`), tính Skewness và Kurtosis. |
+| | `statsmodels` | 0.15.0 | Ước lượng mô hình OLS chi tiết, kiểm định phương sai thay đổi Breusch–Pagan, kiểm định chuẩn Jarque–Bera, xuất bảng tóm tắt hệ số và $p$-value. |
+| **Học máy & Pipeline chuẩn mực** | `scikit-learn` | 1.9.1 | Đóng gói luồng mô hình hóa: chia dữ liệu theo nhóm bệnh nhân (`GroupShuffleSplit`), chuẩn hóa thang đo (`StandardScaler`), mã hóa biến giả (`OneHotEncoder`), huấn luyện `LinearRegression`, `Ridge`, `Lasso`, `RandomForestRegressor`, và đo lường chỉ số (`r2_score`, `mean_squared_error`, `mean_absolute_error`). |
+| **Thuật toán Boosting nâng cao** | `xgboost` / `lightgbm` | 2.0+ | Huấn luyện mô hình Gradient Boosting tối ưu hóa tốc độ và bộ nhớ trên tập dữ liệu bảng quy mô lớn. |
+| **Trực quan hóa & Báo cáo đồ họa** | `matplotlib` | 3.11.2 | Xây dựng đồ thị 2D, tùy biến trục tọa độ, chú giải và xuất ảnh biểu đồ độ phân giải cao (150–300 DPI). |
+| | `seaborn` | 0.13.2 | Vẽ biểu đồ phân phối xác suất KDE, đồ thị hộp Boxplot phân tầng đa biến, và ma trận tương quan nhiệt Heatmap. |
+| **Xuất bản báo cáo khoa học** | `quarto` / `pandoc` | 1.6.42 | Tự động hóa biên dịch toàn bộ mã nguồn, phương trình toán KaTeX và biểu đồ đồ họa ra các định dạng chuẩn Microsoft Word (`.docx`) và HTML. |
+
+: Ngăn xếp công nghệ và hệ sinh thái thư viện Python sử dụng trong nghiên cứu. {#tbl-python-stack}
+
+### 2.5.3. Tiêu chuẩn Lập trình và Cam kết Tính Tái Lập (Reproducibility)
+
+Để đáp ứng chuẩn mực nghiên cứu khoa học và tiêu chí đánh giá nghiêm ngặt của học phần:
+1. **Tuân thủ Chuẩn mực PEP 8:** Toàn bộ mã nguồn Python được cấu trúc sạch sẽ, thụt lề 4 dấu cách, đặt tên biến và hàm tường minh theo quy ước `snake_case`, tách bạch rõ ràng giữa các khối lệnh chuẩn bị dữ liệu và huấn luyện mô hình.
+2. **Kiểm soát Tuyệt đối Hiện tượng Rò rỉ Dữ liệu (Data Leakage):** Việc xử lý điền khuyết và chuẩn hóa thang đo (`fit`) chỉ được thực hiện duy nhất trên tập huấn luyện (Train Set), sau đó áp dụng phép biến đổi (`transform`) thuần túy lên tập kiểm tra (Test Set) thông qua Scikit-learn Pipeline. Phân chia tập dữ liệu được thực hiện theo `BeneID` để ngăn ngừa rò rỉ thông tin người bệnh.
+3. **Cố định Hạt giống Ngẫu nhiên (Random Seed):** Tất cả các thao tác có yếu tố ngẫu nhiên như phân chia dữ liệu `GroupShuffleSplit(..., random_state=42)` và khởi tạo cây trong rừng `RandomForestRegressor(..., random_state=42)` đều được gán cố định giá trị seed là `42`. Điều này bảo đảm kết quả nghiên cứu có tính tái lập ổn định khi cố định phiên bản thư viện và môi trường thực thi.
+
+---
+
+# TỔNG KẾT CHƯƠNG 2 {.unnumbered}
+
+Chương 2 đã hoàn thành việc thiết lập khung lý thuyết và phương pháp luận toàn diện cho Đề tài PRJ-04:
+- Đã phân tích bản chất toán học của mô hình tổng tổn thất $S = \sum X_i$ và phân tích đặc tính phân phối của dữ liệu chi phí y tế Medicare với độ lệch phải lớn ($\gamma_1 = +61.6$ ở ngoại trú) và đuôi dày, đồng thời chỉ ra hiện tượng lệch trái (-2.54) của tập nội trú sau biến đổi logarit.
+- Đã tổng quan có hệ thống 5 công trình nghiên cứu quốc tế kinh điển (Manning & Mullahy, 2001; Bertsimas et al., 2008; Frees et al., 2014; Duncan et al., 2016; Morid et al., 2017) và xác lập các khoảng trống nghiên cứu có căn cứ thực tế.
+- Đã xây dựng sơ đồ quy trình Khoa học Dữ liệu tinh chỉnh từ CRISP-DM (Chapman et al., 2000) và sơ đồ khái niệm kiến trúc dữ liệu bồi thường hai nhánh Outpatient – Inpatient.
+- Đã chuẩn hóa danh sách 4 lớp mô hình dự báo nhất quán (OLS logarit, Ridge & Lasso điều chuẩn, GLM Gamma & Tweedie, Random Forest & Gradient Boosting: XGBoost / LightGBM), cùng hệ thống kiểm định thống kê y tế bám sát cấu trúc dữ liệu thực tế (Welch's $t$-test / Mann–Whitney U, One-Way ANOVA / Kruskal–Wallis, tương quan hạng Spearman).
+- Đã xác lập môi trường thực nghiệm với cấu hình phần cứng thực tế (RAM 24 GB, Python 3.12.10) và cam kết tính tái lập của nghiên cứu.
+
+*Ghi chú về phạm vi dữ liệu:* Do bộ dữ liệu thực tế chỉ gồm hai tệp hồ sơ bồi thường mà không có bảng danh mục người thụ hưởng (`beneficiary.csv`), đề tài không bao gồm các biến nhân khẩu học (tuổi, giới tính) hay tiền sử bệnh mãn tính cá nhân; đây là một hạn chế khách quan của dữ liệu sẽ được thảo luận chi tiết tại Chương 5. Thay vào đó, mô hình tập trung khai thác tối đa các đặc trưng lâm sàng, thời gian điều trị và hành vi cung ứng dịch vụ y tế của các cơ sở khám chữa bệnh.
+
+---
+
+# TÀI LIỆU THAM KHẢO {.unnumbered}
+
+1. Bertsimas, D., Bjarnadóttir, M. V., Kane, M. A., Kryder, J. C., Pandey, R., Vempala, S., & Wang, G. (2008). Algorithmic prediction of health care costs. *Operations Research*, 56(6), 1382–1392. https://doi.org/10.1287/opre.1080.0619
+2. Breiman, L. (2001). Random forests. *Machine Learning*, 45(1), 5–32. https://doi.org/10.1023/A:1010933404324
+3. Chapman, P., Clinton, J., Kerber, R., Khabaza, T., Reinartz, T., Shearer, C., & Wirth, R. (2000). *CRISP-DM 1.0: Step-by-step data mining guide*. Technical Report, The CRISP-DM Consortium.
+4. Chen, T., & Guestrin, C. (2016). XGBoost: A scalable tree boosting system. In *Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining* (pp. 785–794). https://doi.org/10.1145/2939672.2939785
+5. Duan, N. (1983). Smearing estimate: A nonparametric retransformation method. *Journal of the American Statistical Association*, 78(383), 605–610. https://doi.org/10.1080/01621459.1983.10478017
+6. Duncan, I., Loginov, M., & Ludkovski, M. (2016). Testing alternative regression frameworks for predictive modeling of health care costs. *North American Actuarial Journal*, 20(1), 65–87. https://doi.org/10.1080/10920277.2015.1116670
+7. Frees, E. W., Derrig, R. A., & Meyers, G. (Eds.). (2014). *Predictive Modeling Applications in Actuarial Science (Volume 1: Predictive Modeling Techniques)*. Cambridge University Press. https://doi.org/10.1017/CBO9781139342674
+8. Friedman, J. H. (2001). Greedy function approximation: A gradient boosting machine. *Annals of Statistics*, 29(5), 1189–1232. https://doi.org/10.1214/aos/1013203451
+9. Hoerl, A. E., & Kennard, R. W. (1970). Ridge regression: Biased estimation for nonorthogonal problems. *Technometrics*, 12(1), 55–67. https://doi.org/10.1080/00401706.1970.10488634
+10. Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., & Liu, T. Y. (2017). LightGBM: A highly efficient gradient boosting decision tree. *Advances in Neural Information Processing Systems*, 30, 3146–3154.
+11. Manning, W. G., & Mullahy, J. (2001). Estimating log models: To transform or not to transform? *Journal of Health Economics*, 20(4), 461–494. https://doi.org/10.1016/S0167-6296(01)00086-8
+12. Morid, M. A., Kawamoto, K., Ault, T., Swanson, J., & Facelli, J. C. (2017). Supervised learning methods for predicting healthcare costs: Systematic literature review and empirical evaluation. *AMIA Annual Symposium Proceedings*, 2017, 1312–1321.
+13. Nelder, J. A., & Wedderburn, R. W. (1972). Generalized linear models. *Journal of the Royal Statistical Society: Series A (General)*, 135(3), 370–384. https://doi.org/10.2307/2344614
+14. Tibshirani, R. (1996). Regression shrinkage and selection via the lasso. *Journal of the Royal Statistical Society: Series B (Methodological)*, 58(1), 267–288. https://doi.org/10.1111/j.2517-6161.1996.tb02080.x
